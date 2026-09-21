@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 import io
 
-def extract_ultra_hdr_jpeg(input_jpg_path, output_txt_path, metadata_lines=None):
+def extract_hdr_gainmap_to_txt(input_jpg_path, output_txt_path, metadata_lines=None):
     if metadata_lines is None:
         metadata_lines = [""] * 32
 
@@ -13,8 +13,7 @@ def extract_ultra_hdr_jpeg(input_jpg_path, output_txt_path, metadata_lines=None)
     with open(input_jpg_path, 'rb') as f:
         data = f.read()
 
-    # --- 2. MPF (Multi-Picture Format) または 埋め込みJPEGの抽出 ---
-    # Ultra HDR JPEGは、主画像(SDR)の後にゲインマップ(JPEG)が結合されています (FF D8 ... FF D9)
+    # --- 2. 埋め込みJPEG(ゲインマップ)のバイナリ検索と抽出 ---
     jpeg_markers = []
     idx = 0
     while True:
@@ -40,20 +39,18 @@ def extract_ultra_hdr_jpeg(input_jpg_path, output_txt_path, metadata_lines=None)
         print("警告: 埋め込みゲインマップが見つかりませんでした。通常のSDR画像として処理します。")
         sdr_img = Image.open(input_jpg_path).convert('RGB')
 
-    # --- 3. サイズの整合処理 ---
+    # --- 3. サイズの自動調整 ---
     width, height = sdr_img.size
     rgb_array = np.array(sdr_img, dtype=np.uint8)
 
     if gainmap_img is not None:
-        # ゲインマップ画像はメイン画像より解像度が小さい場合があるため、リサイズして合わせる
         if gainmap_img.size != (width, height):
             gainmap_img = gainmap_img.resize((width, height), Image.Resampling.BILINEAR)
         gain_array = np.array(gainmap_img, dtype=np.uint8)
     else:
-        # ゲインマップが無い場合は 00
         gain_array = np.zeros((height, width), dtype=np.uint8)
 
-    # --- 4. テキストファイルへの書き出し (0xrrggbb hh 形式) ---
+    # --- 4. テキストファイルへの書き出し ---
     print(f"書き出し開始: {width}x{height} ピクセル...")
     
     with open(output_txt_path, 'w', encoding='utf-8') as f:
@@ -61,7 +58,7 @@ def extract_ultra_hdr_jpeg(input_jpg_path, output_txt_path, metadata_lines=None)
         for line in metadata_lines:
             f.write(f"{line}\n")
 
-        # ピクセルデータの高速出力 (1行ずつまとめて書き込み)
+        # ピクセルデータの書き出し
         for y in range(height):
             lines = []
             for x in range(width):
