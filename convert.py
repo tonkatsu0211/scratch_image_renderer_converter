@@ -1,9 +1,8 @@
 # pip install pillow numpy
 
-import struct
+import io
 import numpy as np
 from PIL import Image
-import io
 
 def extract_hdr_gainmap_to_txt(input_jpg_path, output_txt_path, metadata_lines=None):
     if metadata_lines is None:
@@ -13,31 +12,41 @@ def extract_hdr_gainmap_to_txt(input_jpg_path, output_txt_path, metadata_lines=N
     with open(input_jpg_path, 'rb') as f:
         data = f.read()
 
-    # --- 2. 埋め込みJPEG(ゲインマップ)のバイナリ検索と抽出 ---
-    jpeg_markers = []
-    idx = 0
+    # --- 2. 完全なJPEGフレームの切り出し (FF D8 ... FF D9) ---
+    jpeg_frames = []
+    cursor = 0
+    
     while True:
-        idx = data.find(b'\xff\xd8', idx)
-        if idx == -1:
+        soi = data.find(b'\xff\xd8', cursor)
+        if soi == -1:
             break
-        jpeg_markers.append(idx)
-        idx += 2
+        
+        eoi = data.find(b'\xff\xd9', soi)
+        if eoi == -1:
+            break
+        
+        # FF D9 (2バイト) を含めて切り出す
+        frame_data = data[soi:eoi + 2]
+        
+        # 10KB以上のフレームのみを対象にする (サムネイルなどの微小フレームを排除)
+        if len(frame_data) > 10240:
+            jpeg_frames.append(frame_data)
+        
+        cursor = eoi + 2
 
     sdr_img = None
     gainmap_img = None
 
-    if len(jpeg_markers) >= 2:
-        print(f"検出: 複数のJPEGフレームが見つかりました ({len(jpeg_markers)}個)。Ultra HDRデータとして解析します。")
-        # 1番目のJPEG (SDRメイン画像)
-        sdr_bytes = data[jpeg_markers[0]:jpeg_markers[1]]
-        sdr_img = Image.open(io.BytesIO(sdr_bytes)).convert('RGB')
+    if len(jpeg_frames) >= 2:
+        print(f"検出: 有効なJPEGフレームが {len(jpeg_frames)} 個見つかりました。Ultra HDRデータとして切り出します。")
+        # 1番目のフレーム (SDRメイン画像)
+        sdr_img = Image.open(io.BytesIO(jpeg_frames[0])).convert('RGB')
         
-        # 2番目のJPEG (HDRゲインマップ)
-        gainmap_bytes = data[jpeg_markers[1]:]
-        gainmap_img = Image.open(io.BytesIO(gainmap_bytes)).convert('L') # グレースケールで読み込み
+        # 2番目のフレーム (HDRゲインマップ)
+        gainmap_img = Image.open(io.BytesIO(jpeg_frames[1])).convert('L')
     else:
-        print("警告: 埋め込みゲインマップが見つかりませんでした。通常のSDR画像として処理します。")
-        sdr_img = Image.open(input_jpg_path).convert('RGB')
+        print("検出: 単一のJPEG画像として読み込みます。")
+        sdr_img = Image.open(io.BytesIO(data) if len(jpeg_frames) == 0 else io.BytesIO(jpeg_frames[0])).convert('RGB')
 
     # --- 3. サイズの自動調整 ---
     width, height = sdr_img.size
@@ -54,11 +63,9 @@ def extract_hdr_gainmap_to_txt(input_jpg_path, output_txt_path, metadata_lines=N
     print(f"書き出し開始: {width}x{height} ピクセル...")
     
     with open(output_txt_path, 'w', encoding='utf-8') as f:
-        # メタデータ 32行を出力
         for line in metadata_lines:
             f.write(f"{line}\n")
 
-        # ピクセルデータの書き出し
         for y in range(height):
             lines = []
             for x in range(width):
