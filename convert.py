@@ -79,10 +79,10 @@ if __name__ == "__main__":
     # Ultra HDR(JPEG) や HDR表示対応の画像をそのまま指定します
     metadata = [
         "0.1",
-        "1",
+        "0.25",
         "2160",
         "3840",
         "RGB",
         "none"
     ]
-    extract_hdr_gainmap_to_txt("/kaggle/input/datasets/tonkatsu0211/testfile3/PXL_20260730_050457969.jpg", "/kaggle/working/testOutput2.txt", metadata)
+    extract_hdr_gainmap_to_txt("PXL_20260730_050457969.jpg", "testOutput3.txt", metadata)
